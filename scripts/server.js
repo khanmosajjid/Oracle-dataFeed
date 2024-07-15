@@ -2,9 +2,9 @@ const { ethers } = require("ethers");
 const axios = require("axios");
 require("dotenv").config();
 const DataOracleJSON = require(__dirname +
-  "/../artifacts/contracts/DataOracle.sol/DataOracle.json");
+  "/../scripts/ABIs/dataOracle.json");
 const OracleCallerJSON = require(__dirname +
-  "/../artifacts/contracts/OracleCaller.sol/OracleCaller.json");
+  "/../scripts/ABIs/oracleCaller.json");
 
 const dataOracleAddress = "0x7C97Ac9F94186BaFb410169Fe8c477C9C608Fc8C";
 const oracleCallerAddress = "0xE2C3793b99da8B0eCFf4cE5aD21D4759c7859C80";
