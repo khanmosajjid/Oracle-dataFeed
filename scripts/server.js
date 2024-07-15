@@ -16,18 +16,16 @@ let pendingRequestQueue = [];
 
 async function getBtcUsdtData() {
   const urls = [
-    // "https://api.coinbase.com/v2/prices/spot?currency=USD",
-    "https://api.kraken.com/0/public/Ticker?pair=XBTUSD",
+    "https://api.coinbase.com/v2/prices/spot?currency=USD",
+    // "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+    "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD",
+    // "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD",
   ];
 
-  const requests = urls.map(
-    (url) => axios.get(url, { timeout: 5000 }) // Set a timeout of 5 seconds
-  );
-
-  async function fetchWithRetry(request, retries = 3) {
+  async function fetchWithRetry(url, retries = 3) {
     for (let i = 0; i < retries; i++) {
       try {
-        return await request;
+        return await axios.get(url, { timeout: 5000 });
       } catch (error) {
         if (i === retries - 1) throw error; // Rethrow if it's the last attempt
         console.warn(`Retrying... (${i + 1})`);
@@ -39,19 +37,24 @@ async function getBtcUsdtData() {
   }
 
   try {
-    const responses = await Promise.all(
-      requests.map((req) => fetchWithRetry(req))
-    );
-     console.log("responses of kraken is",responses);
-    // const coinbasePrice = parseFloat(responses[0].data.data.amount);
-    const krakenPrice = parseFloat(responses[0].data.result.XXBTZUSD.c[0]);
+    const responses = await Promise.all(urls.map((url) => fetchWithRetry(url)));
 
-    // console.log("Coinbase price is---->", coinbasePrice);
-    console.log("Kraken price is---->", krakenPrice);
+    const coinbasePrice = parseFloat(responses[0].data.data.amount);
+    // const coingeckoPrice = parseFloat(responses[1].data.bitcoin.usd);
+    const cryptocomparePrice = parseFloat(responses[1].data.USD);
+   
 
-    return [krakenPrice];
+    console.log("Coinbase price is ---->", coinbasePrice);
+    // console.log("CoinGecko price is ---->", coingeckoPrice);
+    console.log("CryptoCompare price is ---->", cryptocomparePrice);
+
+
+    return [coinbasePrice,cryptocomparePrice];
   } catch (error) {
-    console.error("Error fetching BTC/USDT data:", error);
+    console.error(
+      "Error fetching BTC/USD data:",
+      error.response ? error.response.data : error.message
+    );
     return null;
   }
 }
@@ -95,6 +98,7 @@ async function processRequest(dataOracle, id) {
     console.log("here in process request is------>", retries);
     try {
       const btcUsdtData = await getBtcUsdtData();
+      console.log("btc usd data is--->",btcUsdtData)
       if (!btcUsdtData) {
         throw new Error("Failed to fetch BTC/USDT data");
       }
@@ -105,7 +109,7 @@ async function processRequest(dataOracle, id) {
       }
 
       console.log("average price is---->", averagePrice);
-      const data = averagePrice;
+      const data = averagePrice.toString();
 
       await setLatestData(dataOracle, id, data);
       return;
@@ -176,9 +180,9 @@ async function processRequestQueue(dataOracle) {
 
     setInterval(async () => {
       console.log(pendingRequestQueue);
-      await getBtcUsdtData();
-      // await processRequestQueue(dataOracle);
-    }, 2000);
+ 
+      await processRequestQueue(dataOracle);
+    }, 4000);
   } catch (e) {
     console.log("error is ----->", e);
   }
