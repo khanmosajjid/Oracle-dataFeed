@@ -4,20 +4,32 @@ require("dotenv").config();
 const DataOracleJSON = require("../scripts/ABIs/dataOracle.json");
 const OracleCallerJSON = require("../scripts/ABIs/oracleCaller.json");
 
-const dataOracleAddress = "0x7C97Ac9F94186BaFb410169Fe8c477C9C608Fc8C";
-const oracleCallerAddress = "0xE2C3793b99da8B0eCFf4cE5aD21D4759c7859C80";
+const dataOracleAddressBTC = "0x7C97Ac9F94186BaFb410169Fe8c477C9C608Fc8C";
+const oracleCallerAddressBTC = "0xE2C3793b99da8B0eCFf4cE5aD21D4759c7859C80";
+
+const dataOracleAddressETH = "0x2f18468A23497cBDB760634689c84dD4CAA6f080";
+const oracleCallerAddressETH = "0xCdCfaD6c5555D124879c27B91DfA681649EC9772";
+
+const dataOracleAddressSTX = "0x5261E97A0d79873f203c0727F6C903bE8F386878";
+const oracleCallerAddressSTX = "0x6DDf9A02F2A913d70f4939f9307d4cb2d2BD8e57";
+
+const dataOracleAddressCKB = "0x3fD7A3120Dd2a55FbCccae62Bf78bf8b38B8329f";
+const oracleCallerAddressCKB = "0x01df4883ff3c8dD7D5524E6a7D3f3c62102BeD6e";
 
 const MAX_RETRIES = 5;
 const PROCESS_CHUNK = 3;
 
-let pendingRequestQueue = [];
+let pendingRequestQueueBTC = [];
+let pendingRequestQueueETH = [];
+let pendingRequestQueueSTX = [];
+let pendingRequestQueueCKB = [];
 
-async function getBtcUsdtData() {
+async function getPrice(pair) {
+  const [baseCurrency, quoteCurrency] = pair.split("-");
+
   const urls = [
-    "https://api.coinbase.com/v2/prices/spot?currency=USD",
-    // "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
-    "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD",
-    // "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD",
+    `https://api.coinbase.com/v2/prices/${baseCurrency}-${quoteCurrency}/spot`,
+    `https://min-api.cryptocompare.com/data/price?fsym=${baseCurrency}&tsyms=${quoteCurrency}`,
   ];
 
   async function fetchWithRetry(url, retries = 3) {
@@ -38,19 +50,15 @@ async function getBtcUsdtData() {
     const responses = await Promise.all(urls.map((url) => fetchWithRetry(url)));
 
     const coinbasePrice = parseFloat(responses[0].data.data.amount);
-    // const coingeckoPrice = parseFloat(responses[1].data.bitcoin.usd);
-    const cryptocomparePrice = parseFloat(responses[1].data.USD);
-   
+    const cryptocomparePrice = parseFloat(responses[1].data[quoteCurrency]);
 
-    console.log("Coinbase price is ---->", coinbasePrice);
-    // console.log("CoinGecko price is ---->", coingeckoPrice);
-    console.log("CryptoCompare price is ---->", cryptocomparePrice);
+    console.log(`Coinbase price for ${pair} is ---->`, coinbasePrice);
+    console.log(`CryptoCompare price for ${pair} is ---->`, cryptocomparePrice);
 
-
-    return [coinbasePrice,cryptocomparePrice];
+    return [coinbasePrice, cryptocomparePrice];
   } catch (error) {
     console.error(
-      "Error fetching BTC/USD data:",
+      `Error fetching ${pair} data:`,
       error.response ? error.response.data : error.message
     );
     return null;
@@ -58,7 +66,7 @@ async function getBtcUsdtData() {
 }
 
 function calculateAverage(prices) {
-  if (!prices || prices.length === 0) {
+  if (!Array.isArray(prices) || prices.length === 0) {
     console.error("Invalid prices array:", prices);
     return null;
   }
@@ -67,7 +75,7 @@ function calculateAverage(prices) {
   return sum / prices.length;
 }
 
-async function setLatestData(dataOracle, id, data) {
+async function setLatestData(dataOracle, id, data, oracleCallerAddress) {
   try {
     const gasPrice = await dataOracle.provider.getGasPrice();
 
@@ -77,7 +85,7 @@ async function setLatestData(dataOracle, id, data) {
     };
 
     const tx = await dataOracle.setLatestData(
-      data,
+      data.toString(),
       oracleCallerAddress,
       id,
       txOptions
@@ -90,18 +98,20 @@ async function setLatestData(dataOracle, id, data) {
   }
 }
 
-async function processRequest(dataOracle, id) {
+async function processRequest(dataOracle, id, oracleCaller, pair) {
+  console.log("pair and oracle caller address is--->", pair, oracleCaller);
   let retries = 0;
   while (retries < MAX_RETRIES) {
     console.log("here in process request is------>", retries);
     try {
-      const btcUsdtData = await getBtcUsdtData();
-      console.log("btc usd data is--->",btcUsdtData)
-      if (!btcUsdtData) {
-        throw new Error("Failed to fetch BTC/USDT data");
+      const priceData = await getPrice(pair);
+
+      console.log("price data is--->", priceData);
+      if (!priceData) {
+        throw new Error(`Failed to fetch ${pair} data`);
       }
 
-      const averagePrice = calculateAverage(btcUsdtData);
+      const averagePrice = calculateAverage(priceData);
       if (averagePrice === null) {
         throw new Error("Failed to calculate average price");
       }
@@ -109,12 +119,12 @@ async function processRequest(dataOracle, id) {
       console.log("average price is---->", averagePrice);
       const data = averagePrice.toString();
 
-      await setLatestData(dataOracle, id, data);
+      await setLatestData(dataOracle, id, data, oracleCaller);
       return;
     } catch (error) {
       console.log("error is----->", error);
       if (retries === MAX_RETRIES - 1) {
-        await setLatestData(dataOracle, id, "");
+        await setLatestData(dataOracle, id, "", oracleCaller);
         return;
       }
       retries++;
@@ -122,19 +132,16 @@ async function processRequest(dataOracle, id) {
   }
 }
 
-async function processRequestQueue(dataOracle) {
+async function processRequestQueue(dataOracle, oracleCaller, pair, queue) {
   console.log(">> processRequestQueue 123");
 
   let processedRequests = 0;
   try {
-    while (
-      pendingRequestQueue.length > 0 &&
-      processedRequests < PROCESS_CHUNK
-    ) {
+    while (queue.length > 0 && processedRequests < PROCESS_CHUNK) {
       console.log("in while loop is");
-      const reqId = pendingRequestQueue.shift();
+      const reqId = queue.shift();
       console.log("req id is---->", reqId);
-      await processRequest(dataOracle, reqId);
+      await processRequest(dataOracle, reqId, oracleCaller, pair);
       processedRequests++;
     }
   } catch (e) {
@@ -151,25 +158,88 @@ async function processRequestQueue(dataOracle) {
     const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
     console.log("Wallet address:", wallet.address);
 
-    const dataOracle = new ethers.Contract(
-      dataOracleAddress,
+    const dataOracleBTC = new ethers.Contract(
+      dataOracleAddressBTC,
       DataOracleJSON,
       wallet
     );
-    const oracleCaller = new ethers.Contract(
-      oracleCallerAddress,
+    const oracleCallerBTC = new ethers.Contract(
+      oracleCallerAddressBTC,
+      OracleCallerJSON,
+      wallet
+    );
+
+    const dataOracleETH = new ethers.Contract(
+      dataOracleAddressETH,
+      DataOracleJSON,
+      wallet
+    );
+    const oracleCallerETH = new ethers.Contract(
+      oracleCallerAddressETH,
+      OracleCallerJSON,
+      wallet
+    );
+
+    const dataOracleSTX = new ethers.Contract(
+      dataOracleAddressSTX,
+      DataOracleJSON,
+      wallet
+    );
+    const oracleCallerSTX = new ethers.Contract(
+      oracleCallerAddressSTX,
+      OracleCallerJSON,
+      wallet
+    );
+
+    const dataOracleCKB = new ethers.Contract(
+      dataOracleAddressCKB,
+      DataOracleJSON,
+      wallet
+    );
+    const oracleCallerCKB = new ethers.Contract(
+      oracleCallerAddressCKB,
       OracleCallerJSON,
       wallet
     );
 
     try {
-      oracleCaller.on("ReceivedNewRequestIdEvent", (_id, event) => {
+      oracleCallerBTC.on("ReceivedNewRequestIdEvent", (_id, event) => {
         console.log("NEW EVENT - ReceivedNewRequestIdEvent:", _id);
-        pendingRequestQueue.push(_id);
+        pendingRequestQueueBTC.push(_id);
         console.log("Event details:", event);
       });
 
-      oracleCaller.on("DataUpdatedEvent", (_id, _data) => {
+      oracleCallerBTC.on("DataUpdatedEvent", (_id, _data) => {
+        console.log("NEW EVENT - DataUpdatedEvent: id =", _id, "data =", _data);
+      });
+
+      oracleCallerETH.on("ReceivedNewRequestIdEvent", (_id, event) => {
+        console.log("NEW EVENT - ReceivedNewRequestIdEvent:", _id);
+        pendingRequestQueueETH.push(_id);
+        console.log("Event details:", event);
+      });
+
+      oracleCallerETH.on("DataUpdatedEvent", (_id, _data) => {
+        console.log("NEW EVENT - DataUpdatedEvent: id =", _id, "data =", _data);
+      });
+
+      oracleCallerSTX.on("ReceivedNewRequestIdEvent", (_id, event) => {
+        console.log("NEW EVENT - ReceivedNewRequestIdEvent:", _id);
+        pendingRequestQueueSTX.push(_id);
+        console.log("Event details:", event);
+      });
+
+      oracleCallerSTX.on("DataUpdatedEvent", (_id, _data) => {
+        console.log("NEW EVENT - DataUpdatedEvent: id =", _id, "data =", _data);
+      });
+
+      oracleCallerCKB.on("ReceivedNewRequestIdEvent", (_id, event) => {
+        console.log("NEW EVENT - ReceivedNewRequestIdEvent:", _id);
+        pendingRequestQueueCKB.push(_id);
+        console.log("Event details:", event);
+      });
+
+      oracleCallerCKB.on("DataUpdatedEvent", (_id, _data) => {
         console.log("NEW EVENT - DataUpdatedEvent: id =", _id, "data =", _data);
       });
     } catch (e) {
@@ -177,9 +247,43 @@ async function processRequestQueue(dataOracle) {
     }
 
     setInterval(async () => {
-      console.log(pendingRequestQueue);
- 
-      await processRequestQueue(dataOracle);
+      console.log(pendingRequestQueueBTC);
+      await processRequestQueue(
+        dataOracleBTC,
+        oracleCallerAddressBTC,
+        "BTC-USDT",
+        pendingRequestQueueBTC
+      );
+    }, 4000);
+
+    setInterval(async () => {
+      console.log(pendingRequestQueueETH);
+      await processRequestQueue(
+        dataOracleETH,
+        oracleCallerAddressETH,
+        "ETH-USDT",
+        pendingRequestQueueETH
+      );
+    }, 4000);
+
+    setInterval(async () => {
+      console.log(pendingRequestQueueSTX);
+      await processRequestQueue(
+        dataOracleSTX,
+        oracleCallerAddressSTX,
+        "STX-USDT",
+        pendingRequestQueueSTX
+      );
+    }, 4000);
+
+    setInterval(async () => {
+      console.log(pendingRequestQueueCKB);
+      await processRequestQueue(
+        dataOracleCKB,
+        oracleCallerAddressCKB,
+        "CKB-USDT",
+        pendingRequestQueueCKB
+      );
     }, 4000);
   } catch (e) {
     console.log("error is ----->", e);

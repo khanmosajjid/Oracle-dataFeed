@@ -3,7 +3,11 @@ require("dotenv").config();
 const OracleCallerJSON = require(__dirname +
   "/../artifacts/contracts/OracleCaller.sol/OracleCaller.json");
 
-const oracleCallerAddress = "0xE2C3793b99da8B0eCFf4cE5aD21D4759c7859C80";
+const oracleCallerAddressBTC = "0xE2C3793b99da8B0eCFf4cE5aD21D4759c7859C80";
+const oracleCallerAddressETH = "0xCdCfaD6c5555D124879c27B91DfA681649EC9772";
+const oracleCallerAddressSTX = "0x6DDf9A02F2A913d70f4939f9307d4cb2d2BD8e57";
+const oracleCallerAddressCKB = "0x01df4883ff3c8dD7D5524E6a7D3f3c62102BeD6e";
+
 const MAX_RETRIES = 5;
 
 const main = async () => {
@@ -11,50 +15,89 @@ const main = async () => {
     const provider = new ethers.providers.JsonRpcProvider(
       process.env.PROVIDER_URL
     );
-
     const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
     console.log("Wallet address:", wallet.address);
 
-    const oracleCaller = new ethers.Contract(
-      oracleCallerAddress,
+    const oracleCallerBTC = new ethers.Contract(
+      oracleCallerAddressBTC,
+      OracleCallerJSON.abi,
+      wallet
+    );
+    const oracleCallerETH = new ethers.Contract(
+      oracleCallerAddressETH,
+      OracleCallerJSON.abi,
+      wallet
+    );
+    const oracleCallerSTX = new ethers.Contract(
+      oracleCallerAddressSTX,
+      OracleCallerJSON.abi,
+      wallet
+    );
+    const oracleCallerCKB = new ethers.Contract(
+      oracleCallerAddressCKB,
       OracleCallerJSON.abi,
       wallet
     );
 
     console.log("Setting up event listener for ReceivedNewRequestIdEvent...");
 
-    oracleCaller.on("ReceivedNewRequestIdEvent", (id, event) => {
-      console.log("NEW EVENT - ReceivedNewRequestIdEvent:", id);
-      console.log("Event details:", event);
-    });
+    // Set up event listeners for each oracleCaller
+    const oracleCallers = [
+      { name: "BTC", contract: oracleCallerBTC },
+      { name: "ETH", contract: oracleCallerETH },
+      { name: "STX", contract: oracleCallerSTX },
+      { name: "CKB", contract: oracleCallerCKB },
+    ];
+
+    for (const { name, contract } of oracleCallers) {
+      contract.on("ReceivedNewRequestIdEvent", (id, event) => {
+        console.log(`NEW EVENT - ReceivedNewRequestIdEvent for ${name}:`, id);
+        console.log("Event details:", event);
+      });
+
+      contract.on("DataUpdatedEvent", (id, data) => {
+        console.log(
+          `NEW EVENT - DataUpdatedEvent for ${name}: id =`,
+          id,
+          "data =",
+          data
+        );
+      });
+    }
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    console.log("Triggering updateData...");
-    const tx = await executeWithRetry(async () => {
-      const feeData = await provider.getFeeData();
-   
+    console.log("Triggering updateData for all pairs...");
 
-      const gasLimit = await oracleCaller.estimateGas.updateData();
-      console.log("Estimated Gas Limit:", gasLimit.toString());
+    // Trigger updateData for each oracleCaller
+    for (const { name, contract } of oracleCallers) {
+      const tx = await executeWithRetry(async () => {
+        const feeData = await provider.getFeeData();
+        const gasLimit = await contract.estimateGas.updateData();
+        console.log(`Estimated Gas Limit for ${name}:`, gasLimit.toString());
 
-      const tx = await oracleCaller.updateData({
-        maxPriorityFeePerGas:
-          feeData.maxPriorityFeePerGas*100 || ethers.utils.parseUnits("50", "gwei"),
-        maxFeePerGas:
-          feeData.maxFeePerGas*100 || ethers.utils.parseUnits("100", "gwei"),
-        gasLimit: gasLimit*10,
+        // Increase the gas price by a buffer to avoid underpriced transactions
+        const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas.mul(50);
+        const maxFeePerGas = feeData.maxFeePerGas.mul(50);
+
+        const tx = await contract.updateData({
+          gasLimit: gasLimit,
+          maxPriorityFeePerGas: maxPriorityFeePerGas,
+          maxFeePerGas: maxFeePerGas,
+        });
+
+        return tx;
       });
 
-      return tx;
-    });
+      await tx.wait();
+      console.log(`Transaction for ${name} after success is----->`, tx);
+    }
 
-
-    await tx.wait();
-    console.log("Transaction after success is----->", tx);
-
-    const events = await oracleCaller.queryFilter("ReceivedNewRequestIdEvent");
-    console.log("Queried Events:", events);
+    // Query events for BTC as an example (repeat for other pairs if needed)
+    const eventsBTC = await oracleCallerBTC.queryFilter(
+      "ReceivedNewRequestIdEvent"
+    );
+    console.log("Queried Events for BTC:", eventsBTC);
   } catch (error) {
     console.error("Error in main execution:", error);
   }

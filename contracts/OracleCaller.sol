@@ -8,7 +8,10 @@ import "./OracleCallerInterface.sol";
 
 contract OracleCaller is OracleCallerInterface, Ownable {
   string private data;
-  string public pair="BTC/USD";
+  // string public pair="BTC/USD";
+  // string public pair="ETH/USDT";
+  // string public pair="STACK/USDT";
+  string public pair="CKB/USDT";
 
   DataOracleInterface private oracleInstance;
   address private oracleAddress;
